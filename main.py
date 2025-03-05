@@ -22,17 +22,13 @@ model = genai.GenerativeModel('gemini-2.0-flash')
 app = FastAPI()
 
 # Configure CORS
-allowed_origins = [
-    "https://true-orb-447414-v3.web.app/",
-    "https://true-orb-447414-v3.firebaseapp.com/"
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=["*"],  # Allows requests from any origin (not safe for production)
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_methods=["*"],  # Allows all HTTP methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
 
 class RestaurantURL(BaseModel):
     url: str
