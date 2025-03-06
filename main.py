@@ -142,7 +142,31 @@ def expand_short_url(url: str) -> str:
         if "google.com/maps" in final_url:
             return final_url
             
-        # If not, try to extract from the HTML
+        # If we got redirected to a Google Search page
+        if "google.com/search" in final_url:
+            # Extract the restaurant name from the search query
+            parsed_url = urllib.parse.urlparse(final_url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            
+            # Try to get the restaurant name from different possible parameters
+            restaurant_name = None
+            if 'q' in query_params:
+                restaurant_name = query_params['q'][0]
+            elif 'kgs' in query_params:
+                # If we have a kgs parameter, try to get the name from the HTML
+                soup = BeautifulSoup(response.text, 'html.parser')
+                title_elem = soup.find('title')
+                if title_elem:
+                    # Usually the title is in format "Restaurant Name - Google Search"
+                    restaurant_name = title_elem.text.split(' - ')[0]
+            
+            if restaurant_name:
+                # Create a Google Maps search URL
+                search_url = f"https://www.google.com/maps/search/{urllib.parse.quote(restaurant_name)}"
+                print(f"Created Maps search URL: {search_url}")
+                return search_url
+        
+        # If not a search page, try to extract from the HTML
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Look for various patterns in the HTML
