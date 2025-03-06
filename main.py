@@ -44,6 +44,17 @@ tasks: Dict[str, TaskStatus] = {}
 
 def extract_restaurant_name_from_url(url: str) -> str:
     try:
+        # If it's a search URL, extract the name from the search query
+        if "maps/search/" in url:
+            # Split the URL by 'search/' and take everything after it
+            search_part = url.split('search/')[1]
+            # URL decode the search query
+            search_query = urllib.parse.unquote(search_part)
+            # Clean up the name by removing dots and extra spaces
+            search_query = search_query.replace('.', ' ').replace('  ', ' ').strip()
+            return search_query
+
+        # For regular Maps URLs
         parsed_url = urllib.parse.urlparse(url)
         path_parts = parsed_url.path.split('/')
         
@@ -55,10 +66,13 @@ def extract_restaurant_name_from_url(url: str) -> str:
                 restaurant_name = path_parts[place_index + 1].replace('+', ' ')
                 # Remove any location coordinates or other data after '@'
                 restaurant_name = restaurant_name.split('@')[0]
+                # Clean up the name
+                restaurant_name = restaurant_name.replace('.', ' ').replace('  ', ' ').strip()
                 return restaurant_name
         
         return "Unknown Restaurant"
-    except Exception:
+    except Exception as e:
+        print(f"Error extracting restaurant name: {str(e)}")
         return "Unknown Restaurant"
 
 def analyze_reviews_with_gemini(reviews, restaurant_name):
@@ -150,20 +164,38 @@ def expand_short_url(url: str) -> str:
             
             # Try to get the restaurant name from different possible parameters
             restaurant_name = None
+            
+            # First try to get from the search query
             if 'q' in query_params:
                 restaurant_name = query_params['q'][0]
-            elif 'kgs' in query_params:
-                # If we have a kgs parameter, try to get the name from the HTML
+            
+            # If no name found, try to get from the HTML
+            if not restaurant_name:
                 soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Try to find the name in the title
                 title_elem = soup.find('title')
                 if title_elem:
                     # Usually the title is in format "Restaurant Name - Google Search"
-                    restaurant_name = title_elem.text.split(' - ')[0]
+                    title_text = title_elem.text
+                    if ' - ' in title_text:
+                        restaurant_name = title_text.split(' - ')[0]
+                
+                # If still no name, try to find it in the search results
+                if not restaurant_name:
+                    # Look for the first search result heading
+                    search_result = soup.find('h3')
+                    if search_result:
+                        restaurant_name = search_result.text.strip()
             
             if restaurant_name:
+                # Clean up the restaurant name
+                restaurant_name = restaurant_name.replace(' - Google Search', '')
+                restaurant_name = restaurant_name.replace(' - Google Maps', '')
+                restaurant_name = restaurant_name.strip()
+                
                 # Create a Google Maps search URL
                 search_url = f"https://www.google.com/maps/search/{urllib.parse.quote(restaurant_name)}"
-                print(f"Created Maps search URL: {search_url}")
                 return search_url
         
         # If not a search page, try to extract from the HTML
