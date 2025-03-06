@@ -126,11 +126,14 @@ Please be concise and focus on the most important information. Return only the J
 def expand_short_url(url: str) -> str:
     try:
         # Check if it's a shortened URL
-        if not ("maps.app.goo.gl" in url or "goo.gl/maps" in url):
+        if not ("maps.app.goo.gl" in url or "goo.gl/maps" in url or "g.co/kgs/" in url):
             return url
 
         # Make a request to the shortened URL
-        response = requests.get(url, allow_redirects=True)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        response = requests.get(url, allow_redirects=True, headers=headers)
         
         # Try to get the final URL from the response
         final_url = response.url
@@ -148,7 +151,10 @@ def expand_short_url(url: str) -> str:
             r'https://maps\.google\.com/maps/place/[^"\'<>]+',
             r'data-url="([^"]*maps\.google\.com[^"]*)"',
             r'href="([^"]*maps\.google\.com[^"]*)"',
-            r'window\.location\.href\s*=\s*[\'"]([^\'"]+)[\'"]'
+            r'window\.location\.href\s*=\s*[\'"]([^\'"]+)[\'"]',
+            r'data-href="([^"]*maps\.google\.com[^"]*)"',
+            r'data-google-maps-url="([^"]*maps\.google\.com[^"]*)"',
+            r'data-place-url="([^"]*maps\.google\.com[^"]*)"'
         ]
         
         for pattern in patterns:
@@ -165,6 +171,14 @@ def expand_short_url(url: str) -> str:
             content = tag.get('content', '')
             if "google.com/maps" in content:
                 return content
+                
+        # Try to find the URL in script tags
+        script_tags = soup.find_all('script')
+        for script in script_tags:
+            if script.string and "google.com/maps" in script.string:
+                matches = re.findall(r'https://www\.google\.com/maps/place/[^"\'<>]+', script.string)
+                if matches:
+                    return matches[0]
                 
         raise ValueError("Could not extract full Google Maps URL from shortened link")
     except Exception as e:
