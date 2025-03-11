@@ -341,10 +341,10 @@ async def scrape_reviews(restaurant: RestaurantURL):
 async def get_task_status(task_id: str):
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="Task not found")
+    
+    return tasks[task_id]
 
 @app.get("/wake")
 async def wake_up():
     return {"message": "I Won't Sleep"}
-    
-    return tasks[task_id]
 
