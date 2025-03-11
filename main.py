@@ -42,6 +42,14 @@ class TaskStatus(BaseModel):
 # Store for task states
 tasks: Dict[str, TaskStatus] = {}
 
+# Update the DishSearchRequest model to include optional lat/long
+class DishSearchRequest(BaseModel):
+    dish: str
+    location: str
+    radius: Optional[int] = 10
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
 def extract_restaurant_name_from_url(url: str) -> str:
     try:
         # If it's a search URL, extract the name from the search query
@@ -347,4 +355,345 @@ async def get_task_status(task_id: str):
 @app.get("/wake")
 async def wake_up():
     return {"message": "I Won't Sleep"}
+
+async def analyze_restaurant_for_dish_detailed(restaurant, dish_name):
+    """
+    Perform a detailed analysis of a restaurant for a specific dish using Gemini API.
+    """
+    # Pre-aggregate the reviews
+    reviews_text = "\n".join([
+        f"Review {i+1} ({review['stars']} stars): {review['text']}"
+        for i, review in enumerate(restaurant["reviews"]) if review["text"]
+    ])
+    
+    # Create a detailed prompt for Gemini
+    prompt = f"""You are a food critic specializing in {dish_name}. Analyze these reviews for {restaurant["name"]} and determine if they serve good {dish_name}.
+
+Restaurant Information:
+- Name: {restaurant["name"]}
+- Address: {restaurant["address"]}
+- Overall Rating: {restaurant["rating"]} stars (from {restaurant["reviewsCount"]} reviews)
+
+Reviews:
+{reviews_text}
+
+Please provide your analysis in the following JSON format:
+{{
+    "serves_dish": true/false,
+    "dish_quality": "excellent/good/average/poor/unknown",
+    "dish_description": "brief description of how the {dish_name} is prepared or what makes it special at this restaurant",
+    "key_points": ["2-3 key points about the {dish_name} at this restaurant"],
+    "recommendation": "a brief 1-2 sentence recommendation about the {dish_name} at this restaurant",
+    "recommendation_score": a number from 0 to 10 indicating how strongly you recommend this restaurant for {dish_name}
+}}
+
+If the reviews don't mention {dish_name} specifically, use your judgment based on the overall restaurant quality, cuisine type, and menu items mentioned to determine if they likely serve good {dish_name}.
+
+Focus on:
+1. Quality of the {dish_name} specifically
+2. Unique preparation methods or ingredients
+3. Consistency in positive reviews about the {dish_name}
+4. Overall dining experience related to {dish_name}
+
+Return only the JSON object without any markdown formatting or code block markers."""
+
+    try:
+        response = model.generate_content(prompt)
+        # Clean up the response text
+        response_text = response.text.strip()
+        if response_text.startswith('```json'):
+            response_text = response_text[7:]
+        if response_text.endswith('```'):
+            response_text = response_text[:-3]
+        response_text = response_text.strip()
+        
+        # Try to parse the response as JSON
+        try:
+            analysis = json.loads(response_text)
+            
+            # Calculate an AI score based on the recommendation_score and dish_quality
+            ai_score = analysis.get("recommendation_score", 0)
+            
+            # If recommendation_score is not provided, derive it from dish_quality
+            if ai_score == 0:
+                quality_map = {
+                    "excellent": 9.0,
+                    "good": 7.0,
+                    "average": 5.0,
+                    "poor": 3.0,
+                    "unknown": 4.0
+                }
+                ai_score = quality_map.get(analysis.get("dish_quality", "unknown"), 4.0)
+            
+            # Adjust score based on whether the restaurant serves the dish
+            if not analysis.get("serves_dish", False):
+                ai_score *= 0.5
+            
+            # Create the final restaurant object with analysis
+            result = {
+                "name": restaurant["name"],
+                "address": restaurant["address"],
+                "rating": restaurant["rating"],
+                "reviewsCount": restaurant["reviewsCount"],
+                "url": restaurant["url"],
+                "reviews": restaurant["reviews"],
+                "analysis": analysis,
+                "ai_score": ai_score
+            }
+            
+            # Remove logging statement
+            return result
+            
+        except json.JSONDecodeError:
+            # Remove logging statement
+            return {
+                "name": restaurant["name"],
+                "address": restaurant["address"],
+                "rating": restaurant["rating"],
+                "reviewsCount": restaurant["reviewsCount"],
+                "url": restaurant["url"],
+                "reviews": restaurant["reviews"],
+                "analysis": {
+                    "serves_dish": False,
+                    "dish_quality": "unknown",
+                    "dish_description": f"We couldn't determine if this restaurant serves {dish_name}.",
+                    "key_points": [],
+                    "recommendation": f"This restaurant may serve {dish_name} but we couldn't analyze the quality.",
+                    "recommendation_score": 3
+                },
+                "ai_score": 3.0
+            }
+    except Exception as e:
+        # Remove logging statement
+        return {
+            "name": restaurant["name"],
+            "address": restaurant["address"],
+            "rating": restaurant["rating"],
+            "reviewsCount": restaurant.get("reviewsCount", 0),
+            "url": restaurant["url"],
+            "reviews": restaurant["reviews"],
+            "analysis": {
+                "serves_dish": False,
+                "dish_quality": "unknown",
+                "dish_description": f"Error analyzing this restaurant for {dish_name}.",
+                "key_points": [],
+                "recommendation": f"This restaurant may serve {dish_name} but we couldn't analyze the quality.",
+                "recommendation_score": 2
+            },
+            "ai_score": 2.0
+        }
+
+async def process_dish_search(task_id: str, search_request: DishSearchRequest):
+    try:
+        # Update task status to fetching
+        tasks[task_id].state = "FETCHING"
+        
+        # Initialize the ApifyClient with your API token
+        client = ApifyClient(os.getenv("APIFY_API_TOKEN"))
+        
+        # Construct the search query
+        search_query = f"{search_request.dish} Restaurants"
+        
+        # Prepare the Actor input for initial search
+        run_input = {
+            "searchStringsArray": [search_query],
+            "locationQuery": search_request.location,
+            "maxCrawledPlacesPerSearch": 20,  # Limit to top 20 places for initial search
+            "maxReviews": 10,
+            "reviewsSort": "highestRanking",
+            "scrapeReviewsPersonalData": False,
+            "language": "en"
+        }
+        
+        # Add geolocation data if latitude and longitude are provided
+        if search_request.latitude is not None and search_request.longitude is not None:
+            # Remove logging of precise location
+            run_input["customGeolocation"] = {
+                "type": "Point",
+                "coordinates": [search_request.longitude, search_request.latitude]
+            }
+            # Adjust search radius if provided (convert from km to meters)
+            if search_request.radius:
+                run_input["searchRadius"] = search_request.radius * 1000
+        
+        # Run the Actor and wait for it to finish
+        run = client.actor("compass/crawler-google-places").call(run_input=run_input)
+        
+        # Update task status to processing
+        tasks[task_id].state = "PROCESSING"
+        
+        # Fetch results from the run's dataset
+        restaurants = []
+        
+        for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+            # Check if this is a restaurant item (has title field)
+            if "title" in item:
+                # Process each restaurant
+                restaurant = {
+                    "name": item.get("title", ""),
+                    "address": f"{item.get('street', '')}, {item.get('city', '')}, {item.get('state', '')}",
+                    "rating": item.get("totalScore", 0),
+                    "reviewsCount": item.get("reviewsCount", 0),
+                    "url": item.get("url", ""),
+                    "reviews": []
+                }
+                
+                # Process reviews if they exist in the same item
+                if "reviews" in item:
+                    for review in item.get("reviews", [])[:10]:  # Limit to top 10 reviews
+                        # Ensure text is not None
+                        review_text = review.get("text", "")
+                        if review_text is None:
+                            review_text = ""
+                            
+                        processed_review = {
+                            "text": review_text,
+                            "stars": review.get("stars", 0)
+                        }
+                        restaurant["reviews"].append(processed_review)
+                
+                restaurants.append(restaurant)
+        
+        # If we don't have reviews in the same items, we need to fetch them separately
+        # This is a common pattern with the Apify Google Places crawler
+        if restaurants and all(len(restaurant["reviews"]) == 0 for restaurant in restaurants):
+            # Remove logging statement
+            
+            # Create a dictionary to map restaurant titles to their objects
+            restaurant_map = {restaurant["name"]: restaurant for restaurant in restaurants}
+            
+            # Go through the dataset again to find review items
+            for item in client.dataset(run["defaultDatasetId"]).iterate_items():
+                if "text" in item and "title" in item and item["title"] in restaurant_map:
+                    restaurant_name = item["title"]
+                    # Ensure text is not None
+                    review_text = item.get("text", "")
+                    if review_text is None:
+                        review_text = ""
+                        
+                    processed_review = {
+                        "text": review_text,
+                        "stars": item.get("stars", 0)
+                    }
+                    restaurant_map[restaurant_name]["reviews"].append(processed_review)
+        
+        # Remove logging statement about found restaurants
+        
+        # Step 2: Preliminary Filtering
+        
+        # 1. Basic Ranking by Ratings
+        # Sort restaurants by rating (highest first)
+        restaurants.sort(key=lambda x: x["rating"], reverse=True)
+        
+        # 2. Keyword Check on Reviews
+        dish_name = search_request.dish.lower()
+        # Create a list of possible variations/synonyms of the dish name
+        dish_keywords = [dish_name]
+        # Remove plurals if present or add them if not
+        if dish_name.endswith('s'):
+            dish_keywords.append(dish_name[:-1])  # Remove 's' at the end
+        else:
+            dish_keywords.append(dish_name + 's')  # Add 's' at the end
+            
+        # Add the singular word if the dish name has multiple words
+        if ' ' in dish_name:
+            main_word = dish_name.split(' ')[0]
+            dish_keywords.append(main_word)
+        
+        
+        # Calculate keyword frequency for each restaurant
+        for restaurant in restaurants:
+            # Initialize keyword count
+            restaurant["keyword_count"] = 0
+            
+            # Check each review for keywords
+            # Ensure we're only joining non-None values
+            all_review_text = ' '.join([review["text"].lower() for review in restaurant["reviews"] if review["text"]])
+            
+            # Count occurrences of each keyword
+            for keyword in dish_keywords:
+                # Count whole word matches only
+                restaurant["keyword_count"] += len(re.findall(r'\b' + re.escape(keyword) + r'\b', all_review_text))
+            
+            # Calculate a combined score (rating * (1 + keyword_count/10))
+            # This gives weight to both the rating and the keyword frequency
+            restaurant["combined_score"] = restaurant["rating"] * (1 + restaurant["keyword_count"] / 10)
+            
+        
+        # 3. Select Top Candidates
+        # Sort by the combined score
+        restaurants.sort(key=lambda x: x["combined_score"], reverse=True)
+        
+        # Take top 10 restaurants
+        top_restaurants = restaurants[:10] if len(restaurants) > 10 else restaurants
+        
+        # Remove logging of top 10 restaurants
+        
+        # Update task status to analyzing
+        tasks[task_id].state = "ANALYZING"
+        
+        # Step 3: Detailed Analysis for Top Restaurants
+        # Remove logging statement
+        
+        # Create a list to store analysis tasks
+        analysis_tasks = []
+        
+        # Start detailed analysis for each restaurant in parallel
+        for restaurant in top_restaurants:
+            # Create an analysis task for each restaurant
+            task = asyncio.create_task(analyze_restaurant_for_dish_detailed(restaurant, search_request.dish))
+            analysis_tasks.append(task)
+        
+        # Wait for all analysis tasks to complete
+        analyzed_restaurants = await asyncio.gather(*analysis_tasks)
+        
+        # Ensure all restaurants have an ai_score
+        for restaurant in analyzed_restaurants:
+            if "ai_score" not in restaurant or restaurant["ai_score"] is None:
+                restaurant["ai_score"] = 0.0
+        
+        # Sort restaurants by AI recommendation score (highest first)
+        analyzed_restaurants.sort(key=lambda x: x["ai_score"], reverse=True)
+        
+        # Take top 5 restaurants for final result
+        final_restaurants = analyzed_restaurants[:5] if len(analyzed_restaurants) >= 5 else analyzed_restaurants
+        
+        # Remove logging of final top 5 restaurants
+        
+        # Store the final result
+        result = {
+            "success": True,
+            "dish": search_request.dish,
+            "location": search_request.location,
+            "restaurants": final_restaurants
+        }
+        
+        tasks[task_id].state = "COMPLETED"
+        tasks[task_id].result = result
+
+    except Exception as e:
+        # Keep error logging for debugging purposes
+        print(f"Error in process_dish_search: {str(e)}")
+        tasks[task_id].state = "FAILED"
+        tasks[task_id].result = {"error": str(e)}
+
+@app.post("/api/find-restaurants")
+async def find_restaurants(search_request: DishSearchRequest):
+    try:
+        # Generate a unique task ID
+        task_id = str(uuid.uuid4())
+        
+        # Initialize task status
+        tasks[task_id] = TaskStatus(state="INITIALIZED")
+        
+        # Start processing in the background
+        asyncio.create_task(process_dish_search(task_id, search_request))
+        
+        return {"task_id": task_id}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
