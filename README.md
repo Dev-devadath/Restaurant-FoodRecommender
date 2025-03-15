@@ -1,27 +1,72 @@
-# Deploy FastAPI on Render
+# 🍽️ Where to Order & What to Order
 
-Use this repo as a template to deploy a Python [FastAPI](https://fastapi.tiangolo.com) service on Render.
+## Overview
+Where to Order & What to Order is a smart food discovery platform that helps users **find the best dish at a restaurant** and **discover the best restaurants for a specific dish** near them. By analyzing real customer reviews, ratings, and dish popularity, it ensures that users always get the best food recommendations.
 
-See https://render.com/docs/deploy-fastapi or follow the steps below:
+Use the app: https://true-orb-447414-v3.web.app
 
-## Manual Steps
+## 🚀 Features
+- **📌 What to Order** – Input a restaurant URL and get the **most recommended dish** based on reviews and ratings.
+- **📍 Where to Order** – Enter a dish name, and the platform finds the **top restaurants near you** that serve it.
+- **🔍 Smart Review Analysis** – Uses **ratings, reviews, and sentiment analysis** to ensure accurate recommendations.
+- **📊 Location-Based Filtering** – Supports **latitude and longitude** for precise restaurant searches.
+- **⚡ Fast & Reliable** – Fetches and processes data efficiently to provide quick results.
 
-1. You may use this repository directly or [create your own repository from this template](https://github.com/render-examples/fastapi/generate) if you'd like to customize the code.
-2. Create a new Web Service on Render.
-3. Specify the URL to your new repository or this repository.
-4. Render will automatically detect that you are deploying a Python service and use `pip` to download the dependencies.
-5. Specify the following as the Start Command.
+## 🏆 Why This Matters
+Food choices can be overwhelming. This platform eliminates decision fatigue and ensures you **never waste a meal** by choosing a subpar dish or restaurant.
 
-    ```shell
-    uvicorn main:app --host 0.0.0.0 --port $PORT
-    ```
+## 🛠️ Tech Stack
+- **Backend:** FastAPI, Python
+- **API Integration:** Web scraping & restaurant data APIs & AI
+- **Frontend:** React
 
-6. Click Create Web Service.
+## 📌 How It Works
+1. **Find the Best Dish in a Restaurant**
+   - Enter the restaurant’s URL
+   - The system analyzes reviews & ratings
+   - Get a top recommendation!
 
-Or simply click:
+2. **Find the Best Restaurant for a Dish**
+   - Enter a dish name (e.g., "Biriyani")
+   - Set your location (lat/long or city name)
+   - Get a list of the best restaurants serving it!
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/render-examples/fastapi)
+## 🔥 Getting Started
+### Prerequisites
+- Python 3.x
+- FastAPI
 
-## Thanks
+### Installation
+1. Clone the repository:
+   ```sh
+   git clone https://github.com/your-repo-url
+   cd your-project-folder
+   ```
+2. Install dependencies:
+   ```sh
+   pip install -r requirements.txt
+   ```
+3. Run the API server:
+   ```sh
+   uvicorn main:app --reload
+   ```
+4. Access the API via:
+   ```
+   http://127.0.0.1:8000
+   ```
 
-Thanks to [Harish](https://harishgarg.com) for the [inspiration to create a FastAPI quickstart for Render](https://twitter.com/harishkgarg/status/1435084018677010434) and for some sample code!
+## 🌟 Future Enhancements
+- AI-powered recommendations
+- Integration with food delivery services
+- User preferences & personalized suggestions
+
+## 🤝 Contributing
+Feel free to **fork** this project and submit pull requests! Open to ideas and improvements.
+
+## 📬 Contact
+For queries, suggestions, or collaborations, reach out at **devadaths3@gmail.com** or open an issue in the repo!
+
+---
+
+🎉 **Enjoy the best food without the guesswork!**
+
